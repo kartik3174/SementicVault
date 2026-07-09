@@ -8,6 +8,12 @@ import logging
 from app.loaders import load_document
 from app.cleaners import clean_text
 from app.chunkers import RecursiveCharacterChunker
+from app.api.upload import router as upload_router
+from app.api.chunk import router as chunk_router
+from app.api.embedding import router as embedding_router
+from app.api.vector import router as vector_router
+from app.api.retrieval import router as retrieval_router
+from app.api.chat import router as chat_router
 
 # Configure logging
 logging.basicConfig(
@@ -19,8 +25,8 @@ logger = logging.getLogger("SemanticVault")
 
 app = FastAPI(
     title="SemanticVault API",
-    description="Local LLM-Powered Semantic Retrieval System (RAG) Backend - Phase 2",
-    version="2.0.0"
+    description="Local LLM-Powered Semantic Retrieval System (RAG) Backend - Phase 6",
+    version="6.0.0"
 )
 
 # Set up CORS middleware
@@ -31,6 +37,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include API Routers
+app.include_router(upload_router, prefix="/api")
+app.include_router(upload_router)
+app.include_router(chunk_router, prefix="/api")
+app.include_router(chunk_router)
+app.include_router(embedding_router, prefix="/api")
+app.include_router(embedding_router)
+app.include_router(vector_router, prefix="/api")
+app.include_router(vector_router)
+app.include_router(retrieval_router, prefix="/api")
+app.include_router(retrieval_router)
+app.include_router(chat_router, prefix="/api")
+app.include_router(chat_router)
+
 
 # Pydantic models for request validation
 class ChunkingParams(BaseModel):
