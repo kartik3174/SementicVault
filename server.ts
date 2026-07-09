@@ -367,6 +367,352 @@ app.get("/api/documents/:id/chunks", (req, res) => {
   })));
 });
 
+// API: Retrieve raw text of an indexed document
+app.get("/api/documents/:id/raw", (req, res) => {
+  const doc = documentsDb.find(d => d.id === req.params.id);
+  if (!doc) {
+    res.status(404).json({ error: "Document not found" });
+    return;
+  }
+  res.json({ rawText: doc.rawText });
+});
+
+// Custom Text-Cleaning Normalization and Recursive Chunking implementation for Node (mirrors Phase 2 Python)
+function cleanTextTs(
+  text: string,
+  config: {
+    removeNonPrintable?: boolean;
+    normalizeQuotes?: boolean;
+    cleanBullets?: boolean;
+    collapseSpaces?: boolean;
+    maxNewlines?: number;
+  } = {}
+): string {
+  let cleaned = text;
+
+  // 1. Remove non-printable / control characters
+  if (config.removeNonPrintable !== false) {
+    cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, "");
+  }
+
+  // 2. Normalize smart quotes and dashes
+  if (config.normalizeQuotes !== false) {
+    const replacements: Record<string, string> = {
+      "“": '"',
+      "”": '"',
+      "‘": "'",
+      "’": "'",
+      "–": "-",
+      "—": "-",
+      "…": "...",
+    };
+    for (const [orig, repl] of Object.entries(replacements)) {
+      cleaned = cleaned.replaceAll(orig, repl);
+    }
+  }
+
+  // 3. Clean bullet lists and normalize them
+  if (config.cleanBullets !== false) {
+    cleaned = cleaned.replace(/^\s*[•∙◦▪■\-*+]\s+/gm, "- ");
+  }
+
+  // 4. Normalize line breaks
+  cleaned = cleaned.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const maxNewlines = config.maxNewlines ?? 2;
+  const newlineRegex = new RegExp(`\\n{${maxNewlines + 1},}`, "g");
+  cleaned = cleaned.replace(newlineRegex, "\n".repeat(maxNewlines));
+
+  // 5. Normalize general spaces and tabs
+  if (config.collapseSpaces !== false) {
+    cleaned = cleaned
+      .split("\n")
+      .map(line => line.replace(/[ \t]+/g, " ").trim())
+      .join("\n");
+  }
+
+  return cleaned.trim();
+}
+
+class RecursiveCharacterChunkerTs {
+  chunkSize: number;
+  chunkOverlap: number;
+  separators: string[];
+
+  constructor(chunkSize = 800, chunkOverlap = 150, separators?: string[]) {
+    this.chunkSize = chunkSize;
+    this.chunkOverlap = chunkOverlap;
+    this.separators = separators || ["\n\n", "\n", " ", ""];
+    if (this.chunkOverlap >= this.chunkSize) {
+      throw new Error("Chunk overlap must be strictly less than chunk size.");
+    }
+  }
+
+  private splitTextRecursive(text: string, separators: string[]): string[] {
+    if (text.length <= this.chunkSize) {
+      return [text];
+    }
+    if (separators.length === 0) {
+      const chunks: string[] = [];
+      const step = this.chunkSize - this.chunkOverlap;
+      for (let i = 0; i < text.length; i += step) {
+        chunks.push(text.slice(i, i + this.chunkSize));
+      }
+      return chunks;
+    }
+
+    const separator = separators[0];
+    const nextSeparators = separators.slice(1);
+    
+    let splits: string[];
+    if (separator === "") {
+      splits = Array.from(text);
+    } else {
+      splits = text.split(separator);
+    }
+
+    const chunks: string[] = [];
+    let currentDoc: string[] = [];
+    let currentLen = 0;
+
+    for (const split of splits) {
+      if (split.length > this.chunkSize) {
+        if (currentDoc.length > 0) {
+          chunks.push(currentDoc.join(separator));
+          currentDoc = [];
+          currentLen = 0;
+        }
+        const recursiveSplits = this.splitTextRecursive(split, nextSeparators);
+        chunks.push(...recursiveSplits);
+      } else {
+        const sepLen = currentDoc.length > 0 ? separator.length : 0;
+        if (currentLen + sepLen + split.length <= this.chunkSize) {
+          currentDoc.push(split);
+          currentLen += sepLen + split.length;
+        } else {
+          if (currentDoc.length > 0) {
+            chunks.push(currentDoc.join(separator));
+          }
+          currentDoc = [split];
+          currentLen = split.length;
+        }
+      }
+    }
+
+    if (currentDoc.length > 0) {
+      chunks.push(currentDoc.join(separator));
+    }
+
+    return chunks;
+  }
+
+  splitText(text: string) {
+    if (!text.trim()) return [];
+    
+    const rawChunks = this.splitTextRecursive(text, this.separators);
+    const mergedChunks: any[] = [];
+    let currentCharPtr = 0;
+
+    for (let idx = 0; idx < rawChunks.length; idx++) {
+      const chunkText = rawChunks[idx];
+      let startPos = text.indexOf(chunkText, Math.max(0, currentCharPtr - 100));
+      if (startPos === -1) {
+        startPos = currentCharPtr;
+      }
+      const length = chunkText.length;
+      const endPos = startPos + length;
+      currentCharPtr = endPos;
+
+      mergedChunks.push({
+        index: idx,
+        text: chunkText,
+        char_start: startPos,
+        char_end: endPos,
+        length: length,
+        overlap_before: "",
+        overlap_after: ""
+      });
+    }
+
+    // Compute overlap strings
+    for (let i = 0; i < mergedChunks.length; i++) {
+      if (i > 0) {
+        const prev = mergedChunks[i - 1];
+        const curr = mergedChunks[i];
+        const overlapStart = Math.max(curr.char_start, prev.char_start);
+        const overlapEnd = Math.min(curr.char_end, prev.char_end);
+        
+        if (overlapEnd > overlapStart) {
+          const overlapText = text.slice(overlapStart, overlapEnd);
+          curr.overlap_before = overlapText;
+          prev.overlap_after = overlapText;
+        }
+      }
+    }
+
+    return mergedChunks;
+  }
+}
+
+// API: Chunking Preview (Text Input)
+app.post("/api/chunking-preview/text", (req, res) => {
+  try {
+    const { text, params = {} } = req.body;
+    if (!text) {
+      res.status(400).json({ error: "Missing required text content" });
+      return;
+    }
+
+    const chunkSize = Number(params.chunk_size) || 800;
+    const chunkOverlap = Number(params.chunk_overlap) || 150;
+
+    const cleaned = cleanTextTs(text, {
+      removeNonPrintable: params.remove_non_printable !== false,
+      normalizeQuotes: params.normalize_quotes !== false,
+      cleanBullets: params.clean_bullets !== false,
+      collapseSpaces: params.collapse_spaces !== false,
+      maxNewlines: params.max_newlines !== undefined ? Number(params.max_newlines) : 2
+    });
+
+    const chunker = new RecursiveCharacterChunkerTs(chunkSize, chunkOverlap);
+    const chunks = chunker.splitText(cleaned);
+
+    const totalOriginalChars = text.length;
+    const totalCleanedChars = cleaned.length;
+    const reductionRatio = totalOriginalChars > 0 ? (1.0 - (totalCleanedChars / totalOriginalChars)) : 0;
+
+    res.json({
+      success: true,
+      statistics: {
+        original_characters: totalOriginalChars,
+        cleaned_characters: totalCleanedChars,
+        reduction_ratio: Math.round(reductionRatio * 10000) / 10000,
+        total_chunks: chunks.length,
+        average_chunk_length: chunks.length > 0 ? Math.round((chunks.reduce((acc, c) => acc + c.length, 0) / chunks.length) * 10) / 10 : 0
+      },
+      cleaned_text: cleaned,
+      chunks: chunks
+    });
+  } catch (error: any) {
+    console.error("Chunking preview error:", error);
+    res.status(500).json({ error: error.message || "Failed to process text chunking preview" });
+  }
+});
+
+// API: Chunking Preview (File Input via Base64 payload matching FastAPI format)
+app.post("/api/chunking-preview/file", async (req, res) => {
+  try {
+    const { 
+      name, 
+      type, 
+      base64,
+      chunk_size = 800,
+      chunk_overlap = 150,
+      remove_non_printable = true,
+      normalize_quotes = true,
+      clean_bullets = true,
+      collapse_spaces = true,
+      max_newlines = 2
+    } = req.body;
+
+    if (!name || !type || !base64) {
+      res.status(400).json({ error: "Missing required fields: name, type, base64" });
+      return;
+    }
+
+    let extractedText = "";
+    
+    // Extractor Logic
+    if (type === "text/plain" || name.endsWith(".txt") || name.endsWith(".md")) {
+      const buffer = Buffer.from(base64, "base64");
+      extractedText = buffer.toString("utf-8");
+    } else if (type === "application/pdf" || name.endsWith(".pdf")) {
+      const pdfPart = {
+        inlineData: {
+          mimeType: "application/pdf",
+          data: base64
+        }
+      };
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: [
+          pdfPart,
+          "Extract all readable text, scanned handwriting, data from embedded images, or charts from this PDF document. Do not summarize it. Return the exact, continuous text, keeping page indicators like '[Page 1]' or '[Page 2]' where pages transition."
+        ]
+      });
+      extractedText = response.text || "No text extracted from PDF.";
+    } else if (type.startsWith("image/") || name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".webp") || name.endsWith(".gif")) {
+      let mimeType = type;
+      if (!mimeType || mimeType === "application/octet-stream") {
+        if (name.endsWith(".png")) mimeType = "image/png";
+        else if (name.endsWith(".webp")) mimeType = "image/webp";
+        else if (name.endsWith(".gif")) mimeType = "image/gif";
+        else mimeType = "image/jpeg";
+      }
+      const imagePart = {
+        inlineData: {
+          mimeType: mimeType,
+          data: base64
+        }
+      };
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: [
+          imagePart,
+          "Analyze this image and perform highly accurate OCR to transcribe all printed or handwritten text exactly verbatim. Return the complete transcription."
+        ]
+      });
+      extractedText = response.text || "No text extracted from image.";
+    } else {
+      const filePart = {
+        inlineData: {
+          mimeType: type,
+          data: base64
+        }
+      };
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: [
+          filePart,
+          "Extract all text contents from this document verbatim. Return the clean raw text."
+        ]
+      });
+      extractedText = response.text || "No text extracted from document.";
+    }
+
+    const cleaned = cleanTextTs(extractedText, {
+      removeNonPrintable: remove_non_printable !== false,
+      normalizeQuotes: normalize_quotes !== false,
+      cleanBullets: clean_bullets !== false,
+      collapseSpaces: collapse_spaces !== false,
+      maxNewlines: max_newlines !== undefined ? Number(max_newlines) : 2
+    });
+
+    const chunker = new RecursiveCharacterChunkerTs(Number(chunk_size) || 800, Number(chunk_overlap) || 150);
+    const chunks = chunker.splitText(cleaned);
+
+    const totalOriginalChars = extractedText.length;
+    const totalCleanedChars = cleaned.length;
+    const reductionRatio = totalOriginalChars > 0 ? (1.0 - (totalCleanedChars / totalOriginalChars)) : 0;
+
+    res.json({
+      success: true,
+      filename: name,
+      statistics: {
+        original_characters: totalOriginalChars,
+        cleaned_characters: totalCleanedChars,
+        reduction_ratio: Math.round(reductionRatio * 10000) / 10000,
+        total_chunks: chunks.length,
+        average_chunk_length: chunks.length > 0 ? Math.round((chunks.reduce((acc, c) => acc + c.length, 0) / chunks.length) * 10) / 10 : 0
+      },
+      cleaned_text: cleaned,
+      chunks: chunks
+    });
+  } catch (error: any) {
+    console.error("File chunking preview error:", error);
+    res.status(500).json({ error: error.message || "Failed to process file chunking preview" });
+  }
+});
+
 // Helper: Cosine similarity
 function cosineSimilarity(vecA: number[], vecB: number[]): number {
   if (vecA.length !== vecB.length) return 0;

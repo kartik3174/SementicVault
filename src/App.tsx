@@ -99,9 +99,53 @@ export default function App() {
     embeddingModelUsed: string;
   } | null>(null);
 
-  // active workspace tab: "playground" | "architecture" | "local_cli"
+  // active workspace tab: "playground" | "architecture" | "local_cli" | "pipeline"
   const [activeTab, setActiveTab] = useState<string>("playground");
   const [copiedText, setCopiedText] = useState<string | null>(null);
+
+  // Document Chunking Pipeline Visualizer States
+  const [pipelineSourceType, setPipelineSourceType] = useState<"text" | "doc">("text");
+  const [pipelineText, setPipelineText] = useState<string>(
+    `SemanticVault RAG Chunker Test Document\n\n` +
+    `Retrieval-Augmented Generation (RAG) is an AI framework for improving the quality of LLM responses by grounding the model on external sources of knowledge. Slicing documents into smaller text parts (chunks) is essential for indexing. This is a paragraph demonstrating chunking.\n\n` +
+    `Recursive character chunking is a sophisticated technique. It tries to split the text by structural elements like double newlines first, then single newlines, then spaces, and finally single characters if needed. This preserves semantic meaning by keeping related sentences together in the same chunk.\n\n` +
+    `Overlap variables allow consecutive chunks to share a small region of text. This overlap is crucial because it ensures that information situated exactly at a boundary is not split and lost. For example, if a key sentence spans across Chunk 1 and Chunk 2, the overlap region helps retain full context for both embeddings.\n\n` +
+    `Try modifying the Chunk Size and Chunk Overlap parameters on the left to see how the segment highlights and overlap regions update dynamically! You can also toggle different custom cleaning normalizations like collapsing spaces or standardizing bullet points.`
+  );
+  const [pipelineSelectedDocId, setPipelineSelectedDocId] = useState<string>("");
+  const [pipelineChunkSize, setPipelineChunkSize] = useState<number>(400);
+  const [pipelineChunkOverlap, setPipelineChunkOverlap] = useState<number>(80);
+  const [pipelineRemoveNonPrintable, setPipelineRemoveNonPrintable] = useState<boolean>(true);
+  const [pipelineNormalizeQuotes, setPipelineNormalizeQuotes] = useState<boolean>(true);
+  const [pipelineCleanBullets, setPipelineCleanBullets] = useState<boolean>(true);
+  const [pipelineCollapseSpaces, setPipelineCollapseSpaces] = useState<boolean>(true);
+  const [pipelineMaxNewlines, setPipelineMaxNewlines] = useState<number>(2);
+
+  const [pipelineLoading, setPipelineLoading] = useState<boolean>(false);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const [pipelineResults, setPipelineResults] = useState<{
+    success: boolean;
+    statistics: {
+      original_characters: number;
+      cleaned_characters: number;
+      reduction_ratio: number;
+      total_chunks: number;
+      average_chunk_length: number;
+    };
+    cleaned_text: string;
+    chunks: Array<{
+      index: number;
+      text: string;
+      char_start: number;
+      char_end: number;
+      length: number;
+      overlap_before: string;
+      overlap_after: string;
+    }>;
+  } | null>(null);
+
+  const [selectedPipelineChunkIdx, setSelectedPipelineChunkIdx] = useState<number | null>(null);
+  const [hoveredPipelineChunkIdx, setHoveredPipelineChunkIdx] = useState<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -231,6 +275,84 @@ export default function App() {
       setLoadingChunks(false);
     }
   };
+
+  const handlePipelineRun = async () => {
+    setPipelineLoading(true);
+    setPipelineError(null);
+    setSelectedPipelineChunkIdx(null);
+    setHoveredPipelineChunkIdx(null);
+
+    try {
+      let textToChunk = pipelineText;
+      if (pipelineSourceType === "doc") {
+        if (!pipelineSelectedDocId) {
+          throw new Error("Please select an indexed document from the dropdown.");
+        }
+        const rawRes = await fetch(`/api/documents/${pipelineSelectedDocId}/raw`);
+        if (!rawRes.ok) {
+          throw new Error("Failed to load raw document content.");
+        }
+        const rawData = await rawRes.json();
+        textToChunk = rawData.rawText;
+        setPipelineText(textToChunk);
+      }
+
+      const res = await fetch("/api/chunking-preview/text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: textToChunk,
+          params: {
+            chunk_size: pipelineChunkSize,
+            chunk_overlap: pipelineChunkOverlap,
+            remove_non_printable: pipelineRemoveNonPrintable,
+            normalize_quotes: pipelineNormalizeQuotes,
+            clean_bullets: pipelineCleanBullets,
+            collapse_spaces: pipelineCollapseSpaces,
+            max_newlines: pipelineMaxNewlines
+          }
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Failed to execute pipeline preview");
+      }
+
+      const data = await res.json();
+      setPipelineResults(data);
+    } catch (err: any) {
+      console.error("Pipeline run failed", err);
+      setPipelineError(err.message || "An unexpected error occurred during chunking.");
+    } finally {
+      setPipelineLoading(false);
+    }
+  };
+
+  // Auto-fetch raw text when a pipeline document selection changes
+  useEffect(() => {
+    if (pipelineSourceType === "doc" && pipelineSelectedDocId) {
+      const loadDocRaw = async () => {
+        try {
+          const rawRes = await fetch(`/api/documents/${pipelineSelectedDocId}/raw`);
+          if (rawRes.ok) {
+            const rawData = await rawRes.json();
+            setPipelineText(rawData.rawText);
+          }
+        } catch (e) {
+          console.error("Failed to prefetch document text", e);
+        }
+      };
+      loadDocRaw();
+    }
+  }, [pipelineSelectedDocId, pipelineSourceType]);
+
+  // Run initial pipeline when pipeline tab is selected
+  useEffect(() => {
+    if (activeTab === "pipeline" && !pipelineResults && !pipelineLoading) {
+      handlePipelineRun();
+    }
+  }, [activeTab]);
 
   // Recursively read all files from dragged items (files and folders)
   const getAllFilesFromEntries = async (dataTransferItems: DataTransferItemList): Promise<File[]> => {
@@ -886,6 +1008,16 @@ export default function App() {
               >
                 Local Deployment & Commands
               </button>
+              <button 
+                onClick={() => setActiveTab("pipeline")}
+                className={`px-4 py-2 text-xs font-medium rounded-lg border transition-all duration-200 ${
+                  activeTab === "pipeline" 
+                    ? "bg-[#161618] border-[#262626] text-white font-semibold shadow-md" 
+                    : "border-transparent text-slate-400 hover:text-white"
+                }`}
+              >
+                Loader & Chunker Pipeline
+              </button>
             </div>
 
             {/* Quick model configuration controls */}
@@ -1277,10 +1409,497 @@ export default function App() {
                 </div>
               )}
 
+              {activeTab === "pipeline" && (
+                <div className="flex-1 flex flex-col lg:flex-row overflow-hidden bg-[#0c0c0e]">
+                  {/* Left Panel: Configuration & Normalization */}
+                  <div className="w-full lg:w-96 bg-[#0f0f11] border-r border-[#262626] p-5 overflow-y-auto space-y-6 flex flex-col shrink-0">
+                    <div>
+                      <h2 className="text-sm font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2 mb-1">
+                        <Sliders className="w-4 h-4 text-blue-500" />
+                        Pipeline Variables
+                      </h2>
+                      <p className="text-[10px] text-slate-500 font-mono">PHASE 2: CLEAN, NORMALIZATION & CHUNK</p>
+                    </div>
+
+                    {/* Config 1: Chunk Size */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-xs font-mono">
+                        <span className="text-slate-400">Target Chunk Size</span>
+                        <span className="text-blue-400 font-bold">{pipelineChunkSize} chars</span>
+                      </div>
+                      <input 
+                        type="range" 
+                        min="100" 
+                        max="1500" 
+                        step="50"
+                        value={pipelineChunkSize} 
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          setPipelineChunkSize(val);
+                          if (pipelineChunkOverlap >= val) {
+                            setPipelineChunkOverlap(Math.max(0, val - 50));
+                          }
+                        }}
+                        className="w-full h-1 bg-[#1e1e21] rounded-lg appearance-none cursor-pointer accent-blue-500"
+                      />
+                      <p className="text-[10px] text-slate-500 leading-normal">
+                        The target maximum character limit for each text segment.
+                      </p>
+                    </div>
+
+                    {/* Config 2: Chunk Overlap */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-xs font-mono">
+                        <span className="text-slate-400">Chunk Overlap</span>
+                        <span className="text-blue-400 font-bold">{pipelineChunkOverlap} chars</span>
+                      </div>
+                      <input 
+                        type="range" 
+                        min="0" 
+                        max="600" 
+                        step="10"
+                        value={pipelineChunkOverlap} 
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          if (val < pipelineChunkSize) {
+                            setPipelineChunkOverlap(val);
+                          }
+                        }}
+                        className="w-full h-1 bg-[#1e1e21] rounded-lg appearance-none cursor-pointer accent-blue-500"
+                      />
+                      <p className="text-[10px] text-slate-500 leading-normal">
+                        Characters shared between adjacent chunks to maintain context.
+                      </p>
+                    </div>
+
+                    {/* Config 3: Source Select */}
+                    <div className="space-y-2 pt-2 border-t border-[#1e1e21]">
+                      <span className="text-[11px] uppercase tracking-wider text-slate-500 font-mono font-bold block mb-2">Input Source</span>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button 
+                          type="button"
+                          onClick={() => setPipelineSourceType("text")}
+                          className={`py-1.5 px-3 text-xs font-mono rounded border transition ${
+                            pipelineSourceType === "text" 
+                              ? "bg-blue-600/10 border-blue-500/40 text-blue-400 font-semibold" 
+                              : "bg-transparent border-[#262626] text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          Paste Text
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            setPipelineSourceType("doc");
+                            if (documents.length > 0 && !pipelineSelectedDocId) {
+                              setPipelineSelectedDocId(documents[0].id);
+                            }
+                          }}
+                          className={`py-1.5 px-3 text-xs font-mono rounded border transition ${
+                            pipelineSourceType === "doc" 
+                              ? "bg-blue-600/10 border-blue-500/40 text-blue-400 font-semibold" 
+                              : "bg-transparent border-[#262626] text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          Vault File
+                        </button>
+                      </div>
+
+                      {pipelineSourceType === "doc" && (
+                        <div className="pt-2">
+                          <select 
+                            value={pipelineSelectedDocId}
+                            onChange={(e) => setPipelineSelectedDocId(e.target.value)}
+                            className="w-full bg-[#161618] border border-[#262626] rounded p-2 text-xs text-slate-300 focus:outline-none focus:border-blue-500 font-mono"
+                          >
+                            <option value="" disabled>Select indexed document...</option>
+                            {documents.map(doc => (
+                              <option key={doc.id} value={doc.id}>{doc.name} ({formatSize(doc.size)})</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Config 4: Text Cleaning Custom Normalizations */}
+                    <div className="space-y-3 pt-4 border-t border-[#1e1e21]">
+                      <span className="text-[11px] uppercase tracking-wider text-slate-500 font-mono font-bold block">Text-Cleaning Filters</span>
+                      
+                      {/* Filter 1 */}
+                      <label className="flex items-start gap-2.5 cursor-pointer group">
+                        <input 
+                          type="checkbox" 
+                          checked={pipelineCollapseSpaces}
+                          onChange={(e) => setPipelineCollapseSpaces(e.target.checked)}
+                          className="mt-0.5 w-3.5 h-3.5 rounded bg-[#161618] border-[#262626] text-blue-600 focus:ring-0 cursor-pointer"
+                        />
+                        <div>
+                          <span className="text-xs text-slate-300 group-hover:text-white transition font-mono">Collapse Whitespace</span>
+                          <p className="text-[9px] text-slate-500">Converts multiple spaces/tabs into a single space.</p>
+                        </div>
+                      </label>
+
+                      {/* Filter 2 */}
+                      <label className="flex items-start gap-2.5 cursor-pointer group">
+                        <input 
+                          type="checkbox" 
+                          checked={pipelineCleanBullets}
+                          onChange={(e) => setPipelineCleanBullets(e.target.checked)}
+                          className="mt-0.5 w-3.5 h-3.5 rounded bg-[#161618] border-[#262626] text-blue-600 focus:ring-0 cursor-pointer"
+                        />
+                        <div>
+                          <span className="text-xs text-slate-300 group-hover:text-white transition font-mono">Standardize Lists</span>
+                          <p className="text-[9px] text-slate-500">Transforms custom bullets into hyphens (-).</p>
+                        </div>
+                      </label>
+
+                      {/* Filter 3 */}
+                      <label className="flex items-start gap-2.5 cursor-pointer group">
+                        <input 
+                          type="checkbox" 
+                          checked={pipelineNormalizeQuotes}
+                          onChange={(e) => setPipelineNormalizeQuotes(e.target.checked)}
+                          className="mt-0.5 w-3.5 h-3.5 rounded bg-[#161618] border-[#262626] text-blue-600 focus:ring-0 cursor-pointer"
+                        />
+                        <div>
+                          <span className="text-xs text-slate-300 group-hover:text-white transition font-mono">Smart Quotes & Dashes</span>
+                          <p className="text-[9px] text-slate-500">Converts curly quotes to standard ascii quotes.</p>
+                        </div>
+                      </label>
+
+                      {/* Filter 4 */}
+                      <label className="flex items-start gap-2.5 cursor-pointer group">
+                        <input 
+                          type="checkbox" 
+                          checked={pipelineRemoveNonPrintable}
+                          onChange={(e) => setPipelineRemoveNonPrintable(e.target.checked)}
+                          className="mt-0.5 w-3.5 h-3.5 rounded bg-[#161618] border-[#262626] text-blue-600 focus:ring-0 cursor-pointer"
+                        />
+                        <div>
+                          <span className="text-xs text-slate-300 group-hover:text-white transition font-mono">Strip Non-Printable</span>
+                          <p className="text-[9px] text-slate-500">Removes unprintable binary characters.</p>
+                        </div>
+                      </label>
+
+                      {/* Filter 5: Line breaks count config */}
+                      <div className="space-y-1.5 pl-6">
+                        <div className="flex justify-between text-[10px] font-mono">
+                          <span className="text-slate-500">Max Consecutive Newlines</span>
+                          <span className="text-slate-300 font-bold">{pipelineMaxNewlines}</span>
+                        </div>
+                        <input 
+                          type="range" 
+                          min="1" 
+                          max="4" 
+                          value={pipelineMaxNewlines} 
+                          onChange={(e) => setPipelineMaxNewlines(Number(e.target.value))}
+                          className="w-full h-1 bg-[#1e1e21] rounded appearance-none cursor-pointer accent-blue-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* CTA Run Trigger */}
+                    <button
+                      onClick={handlePipelineRun}
+                      disabled={pipelineLoading}
+                      className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-blue-500/10 active:scale-95 transition-all flex items-center justify-center gap-2 font-mono"
+                    >
+                      {pipelineLoading ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          COMPILING & PARSING...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4" />
+                          RUN EXTRACTION & CHUNK
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Right Panel: Code Sandbox & Segment visualization map */}
+                  <div className="flex-1 flex flex-col overflow-hidden p-6 space-y-6">
+                    
+                    {/* Dynamic Source Input text area or summary */}
+                    <div className="bg-[#0f0f11] border border-[#262626] rounded-2xl flex flex-col h-44 shrink-0 overflow-hidden relative">
+                      <div className="h-8 border-b border-[#262626] bg-[#161618] px-4 flex items-center justify-between">
+                        <span className="text-[10px] uppercase font-mono tracking-wider font-bold text-slate-400">
+                          Source Document Buffer
+                        </span>
+                        <span className="text-[10px] font-mono text-slate-500">
+                          {pipelineText.length} Characters
+                        </span>
+                      </div>
+                      <textarea
+                        value={pipelineText}
+                        onChange={(e) => {
+                          if (pipelineSourceType === "text") {
+                            setPipelineText(e.target.value);
+                          }
+                        }}
+                        disabled={pipelineSourceType === "doc" || pipelineLoading}
+                        placeholder="Paste or write raw document text here..."
+                        className="flex-1 bg-transparent p-4 text-xs font-mono text-slate-300 border-none outline-none resize-none placeholder-slate-600 focus:ring-0 leading-relaxed overflow-y-auto"
+                      />
+                      {pipelineSourceType === "doc" && (
+                        <div className="absolute inset-0 bg-[#0c0c0e]/40 backdrop-blur-[1px] pointer-events-none flex items-center justify-center">
+                          <span className="text-[10px] font-mono text-slate-400 bg-[#161618] border border-[#262626] px-3 py-1.5 rounded-lg shadow-lg">
+                            🔒 VIEWING INDEXED FILE (EDIT VIA PASTE MODE)
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Main Results area */}
+                    <div className="flex-1 flex flex-col lg:flex-row gap-6 overflow-hidden">
+                      
+                      {/* Left pane: Chunk listing & visual stats */}
+                      <div className="flex-1 flex flex-col overflow-hidden bg-[#0f0f11] border border-[#262626] rounded-2xl">
+                        <div className="h-10 border-b border-[#262626] bg-[#161618] px-5 flex items-center justify-between shrink-0">
+                          <span className="text-[10px] uppercase font-mono tracking-wider font-bold text-slate-400">
+                            Generated Logical Chunks
+                          </span>
+                          {pipelineResults?.statistics && (
+                            <span className="text-[10px] font-mono text-emerald-400 font-semibold bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
+                              {pipelineResults.statistics.total_chunks} Segments
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                          {pipelineError && (
+                            <div className="p-4 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs rounded-xl font-mono">
+                              ⚠️ {pipelineError}
+                            </div>
+                          )}
+
+                          {pipelineLoading ? (
+                            <div className="flex flex-col items-center justify-center py-24 space-y-3">
+                              <div className="w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                              <p className="text-xs text-slate-400 font-mono">Processing Pipeline Chunker Execution...</p>
+                            </div>
+                          ) : !pipelineResults ? (
+                            <div className="flex flex-col items-center justify-center py-24 text-center">
+                              <FileCode className="w-10 h-10 text-slate-700 mb-3" />
+                              <p className="text-xs text-slate-400 font-semibold">No chunks generated yet</p>
+                              <p className="text-[10px] text-slate-500 mt-1">Configure parameters and hit 'Run Extraction & Chunk' to visualize segmentation.</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              {/* Stats Dashboard */}
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+                                <div className="bg-[#161618] p-3 rounded-xl border border-[#262626] text-center">
+                                  <p className="text-[9px] font-mono uppercase text-slate-500">Original Chars</p>
+                                  <p className="text-md font-mono font-bold text-white mt-1">
+                                    {pipelineResults.statistics.original_characters}
+                                  </p>
+                                </div>
+                                <div className="bg-[#161618] p-3 rounded-xl border border-[#262626] text-center">
+                                  <p className="text-[9px] font-mono uppercase text-slate-500">Normalized Chars</p>
+                                  <p className="text-md font-mono font-bold text-white mt-1">
+                                    {pipelineResults.statistics.cleaned_characters}
+                                  </p>
+                                </div>
+                                <div className="bg-[#161618] p-3 rounded-xl border border-[#262626] text-center">
+                                  <p className="text-[9px] font-mono uppercase text-slate-500">Trimmed Noise</p>
+                                  <p className="text-md font-mono font-bold text-emerald-400 mt-1">
+                                    {Math.round(pipelineResults.statistics.reduction_ratio * 1000) / 10}%
+                                  </p>
+                                </div>
+                                <div className="bg-[#161618] p-3 rounded-xl border border-[#262626] text-center">
+                                  <p className="text-[9px] font-mono uppercase text-slate-500">Avg Churn Chars</p>
+                                  <p className="text-md font-mono font-bold text-blue-400 mt-1">
+                                    {pipelineResults.statistics.average_chunk_length}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Grid indicator of all chunks */}
+                              <div className="bg-[#161618] border border-[#262626] p-4 rounded-xl space-y-2">
+                                <p className="text-[10px] font-mono text-slate-400 uppercase tracking-wider font-bold">Segmentation Density Grid</p>
+                                <div className="flex flex-wrap gap-1.5 pt-1">
+                                  {pipelineResults.chunks.map((ch) => (
+                                    <button
+                                      key={ch.index}
+                                      onMouseEnter={() => setHoveredPipelineChunkIdx(ch.index)}
+                                      onMouseLeave={() => setHoveredPipelineChunkIdx(null)}
+                                      onClick={() => setSelectedPipelineChunkIdx(ch.index)}
+                                      className={`h-7 px-2.5 text-[10px] font-mono font-bold rounded-md border flex items-center transition-all ${
+                                        selectedPipelineChunkIdx === ch.index
+                                          ? "bg-blue-600 text-white border-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.3)] scale-105"
+                                          : hoveredPipelineChunkIdx === ch.index
+                                            ? "bg-[#202024] border-slate-500 text-white"
+                                            : "bg-[#0c0c0e] border-[#262626] text-slate-400 hover:text-slate-200"
+                                      }`}
+                                    >
+                                      C-{ch.index + 1}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* Listing */}
+                              <div className="space-y-2 pt-2">
+                                <p className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">Chunk Cards stack</p>
+                                <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                                  {pipelineResults.chunks.map((ch) => (
+                                    <div
+                                      key={ch.index}
+                                      onClick={() => setSelectedPipelineChunkIdx(ch.index)}
+                                      onMouseEnter={() => setHoveredPipelineChunkIdx(ch.index)}
+                                      onMouseLeave={() => setHoveredPipelineChunkIdx(null)}
+                                      className={`p-3.5 rounded-xl border text-left cursor-pointer transition duration-150 relative overflow-hidden group ${
+                                        selectedPipelineChunkIdx === ch.index
+                                          ? "bg-blue-600/5 border-blue-500/40"
+                                          : hoveredPipelineChunkIdx === ch.index
+                                            ? "bg-[#1d1d21] border-[#2d2d30]"
+                                            : "bg-[#131315] border-[#262626] hover:bg-[#1a1a1c]"
+                                      }`}
+                                    >
+                                      <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 border-b border-[#262626]/50 pb-2 mb-2">
+                                        <span className={`${selectedPipelineChunkIdx === ch.index ? "text-blue-400 font-bold" : "text-slate-400"}`}>
+                                          CHUNK #{ch.index + 1}
+                                        </span>
+                                        <span className="text-slate-500">{ch.length} chars</span>
+                                      </div>
+                                      <p className="text-xs text-slate-300 leading-relaxed line-clamp-3 select-text pr-4">{ch.text}</p>
+                                      
+                                      <div className="flex items-center gap-3 pt-2.5 mt-2.5 border-t border-[#262626]/30 text-[9px] font-mono text-slate-500">
+                                        {ch.overlap_before && (
+                                          <span className="flex items-center text-purple-400">
+                                            <span className="w-1.5 h-1.5 bg-purple-400 rounded-full mr-1" />
+                                            Prev Overlap ({ch.overlap_before.length}c)
+                                          </span>
+                                        )}
+                                        {ch.overlap_after && (
+                                          <span className="flex items-center text-emerald-400">
+                                            <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1" />
+                                            Next Overlap ({ch.overlap_after.length}c)
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Right pane: Overlap Variables Highlight Visualizer */}
+                      <div className="w-full lg:w-96 flex flex-col bg-[#0f0f11] border border-[#262626] rounded-2xl overflow-hidden">
+                        <div className="h-10 border-b border-[#262626] bg-[#161618] px-5 flex items-center shrink-0">
+                          <span className="text-[10px] uppercase font-mono tracking-wider font-bold text-slate-400">
+                            Interactive Overlap Inspection
+                          </span>
+                        </div>
+
+                        <div className="flex-1 p-5 overflow-y-auto space-y-4">
+                          {selectedPipelineChunkIdx !== null && pipelineResults ? (() => {
+                            const ch = pipelineResults.chunks[selectedPipelineChunkIdx];
+                            let overlapBeforePart = "";
+                            let overlapAfterPart = "";
+                            let centerPart = ch.text;
+
+                            if (ch.overlap_before && ch.text.startsWith(ch.overlap_before)) {
+                              overlapBeforePart = ch.overlap_before;
+                              centerPart = centerPart.substring(ch.overlap_before.length);
+                            }
+                            if (ch.overlap_after && centerPart.endsWith(ch.overlap_after)) {
+                              overlapAfterPart = ch.overlap_after;
+                              centerPart = centerPart.substring(0, centerPart.length - ch.overlap_after.length);
+                            }
+
+                            return (
+                              <div className="space-y-4">
+                                <div className="flex justify-between items-center text-xs border-b border-[#262626] pb-3">
+                                  <span className="font-mono text-slate-400">SELECTED CHUNK: #{ch.index + 1}</span>
+                                  <span className="font-mono bg-[#161618] text-slate-300 border border-[#262626] px-2 py-0.5 rounded">
+                                    {ch.length} chars
+                                  </span>
+                                </div>
+
+                                <div className="space-y-2 p-3 bg-[#0c0c0e] border border-[#262626] rounded-xl text-[10px] font-mono">
+                                  <p className="text-slate-400 uppercase font-bold text-[9px] mb-1">Color Legend</p>
+                                  <div className="flex flex-col gap-1.5 text-slate-300">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-3 h-3 bg-purple-500/20 border border-purple-500/40 rounded shrink-0" />
+                                      <span>Overlap with preceding chunk ({ch.overlap_before?.length || 0} chars)</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-3 h-3 bg-blue-500/10 border border-blue-500/20 rounded shrink-0" />
+                                      <span>Unique central segment</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-3 h-3 bg-emerald-500/20 border border-emerald-500/40 rounded shrink-0" />
+                                      <span>Overlap with succeeding chunk ({ch.overlap_after?.length || 0} chars)</span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="bg-[#0c0c0e] border border-[#262626] rounded-xl p-4 font-sans text-xs leading-relaxed text-slate-200 select-text space-y-4 shadow-inner">
+                                  <div className="whitespace-pre-wrap leading-relaxed select-text">
+                                    {overlapBeforePart && (
+                                      <span className="bg-purple-500/20 text-purple-300 border border-purple-500/40 px-1 py-0.5 rounded-md font-semibold select-text" title="Overlaps with preceding chunk">
+                                        {overlapBeforePart}
+                                      </span>
+                                    )}
+                                    <span className="bg-blue-500/5 text-slate-200 px-1 py-0.5 select-text">
+                                      {centerPart}
+                                    </span>
+                                    {overlapAfterPart && (
+                                      <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1 py-0.5 rounded-md font-semibold select-text" title="Overlaps with next chunk">
+                                        {overlapAfterPart}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
+                                  <button
+                                    type="button"
+                                    disabled={ch.index === 0}
+                                    onClick={() => setSelectedPipelineChunkIdx(ch.index - 1)}
+                                    className="bg-[#161618] p-2.5 rounded-xl border border-[#262626] text-left hover:bg-[#202024] transition disabled:opacity-40 disabled:pointer-events-none"
+                                  >
+                                    <span className="text-slate-500 block mb-0.5">← PREVIOUS</span>
+                                    <span className="text-white">Chunk #{ch.index}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={ch.index === pipelineResults.chunks.length - 1}
+                                    onClick={() => setSelectedPipelineChunkIdx(ch.index + 1)}
+                                    className="bg-[#161618] p-2.5 rounded-xl border border-[#262626] text-right hover:bg-[#202024] transition disabled:opacity-40 disabled:pointer-events-none"
+                                  >
+                                    <span className="text-slate-500 block mb-0.5">NEXT →</span>
+                                    <span className="text-white">Chunk #{ch.index + 2}</span>
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })() : (
+                            <div className="flex flex-col items-center justify-center py-24 text-center">
+                              <Sliders className="w-8 h-8 text-slate-700 mb-2" />
+                              <p className="text-xs text-slate-400 font-semibold">No Segment Selected</p>
+                              <p className="text-[10px] text-slate-500 mt-1">Select any chunk card on the left to inspect its exact overlap highlighting details.</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                    </div>
+
+                  </div>
+                </div>
+              )}
+
             </div>
 
             {/* Right portion: Document Chunk Monitor Panel */}
-            <div className="w-80 border-l border-[#262626] bg-[#0f0f11] flex flex-col overflow-hidden shrink-0">
+            {activeTab !== "pipeline" && (
+              <div className="w-80 border-l border-[#262626] bg-[#0f0f11] flex flex-col overflow-hidden shrink-0">
               <div className="p-4 border-b border-[#262626] flex items-center justify-between">
                 <h3 className="text-xs font-bold text-slate-300 uppercase font-mono flex items-center gap-2">
                   <Terminal className="w-4 h-4 text-emerald-400 animate-pulse" />
@@ -1330,6 +1949,7 @@ export default function App() {
                 )}
               </div>
             </div>
+            )}
 
           </div>
 
