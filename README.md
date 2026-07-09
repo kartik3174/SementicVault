@@ -1,208 +1,636 @@
-# SemanticVault – Enterprise local RAG Document Intelligence System
+# SemanticVault 🧠📚
 
-Welcome to **SemanticVault**, an enterprise-grade, high-security, local-first Retrieval-Augmented Generation (RAG) system. Engineered for high performance, SemanticVault processes documents (PDFs, DOCX, TXT, Markdown), generates layout-aware chunks with parametric sliding overlaps, encodes text into dense vectors, and leverages advanced semantic retrieval to serve accurate responses powered by local LLMs (Ollama/Llama 3.2) or Gemini API, complete with inline grounded source citations and page numbers.
+> **Private AI. Smarter Search. Local Intelligence.**
 
-All operations—text extraction, tokenization, vector searches, and LLM inference—are isolated within secure server boundaries. Zero third-party cloud data leaks, maximum performance, and cryptographic security.
+SemanticVault is a **production-ready Local LLM-Powered Retrieval-Augmented Generation (RAG) platform** that enables users to upload documents and interact with them using natural language. Unlike cloud-based AI services, SemanticVault runs **entirely on your local machine** using **Ollama**, ensuring complete data privacy while delivering fast, context-aware responses.
 
 ---
 
-## 🏗️ SYSTEM ARCHITECTURE & DIAGRAMS
+## ✨ Features
 
-### 1. Conceptual Architecture & System Design
-```
-                       +----------------------------------+
-                       |        React 19 Frontend         |
-                       |   (Vite, Tailwind, Lucide Icons)  |
-                       +----------------┬-----------------+
-                                        │
-                                        │ (HTTPS / SSE Stream)
-                                        ▼
-                       +----------------------------------+
-                       |       Node.js Express API        | (Gateway, Auth, Telemetry, History,
-                       |        & RAG Orchestrator        |  Prompt Injection Guardrails)
-                       +--------┬────────────────┬--------+
-                                │                │
-             (Embed / Query)    │                │ (Read / Write Metadata)
-                                ▼                ▼
-         +------------------------------+  +------------------------------+
-         |     Python ML Microservice   |  |   Durable Local Database     |
-         |    (FastAPI Ingest / ML)     |  |       (data/db.json)         |
-         +--------------┬---------------+  +------------------------------+
-                        │
-                        ├──────────────────────────────┐
-                        ▼                              ▼
-         +------------------------------+  +------------------------------+
-         |      Local Vector Store      |  |      Inference Core          |
-         |      (ChromaDB Engine)       |  |  (Ollama Llama / Gemini API) |
-         +------------------------------+  +------------------------------+
+### 📄 Document Management
+
+* Upload PDF, DOCX, TXT, and Markdown files
+* Multiple document support
+* Drag-and-drop upload
+* Document metadata extraction
+* Automatic document indexing
+* Delete and re-index documents
+
+### ✂️ Intelligent Processing
+
+* Text extraction
+* Intelligent text cleaning
+* Recursive chunking
+* Metadata generation
+* Chunk validation
+* Token estimation
+
+### 🧠 AI & RAG
+
+* Local LLM using Ollama
+* Retrieval-Augmented Generation (RAG)
+* Semantic Search
+* Context-aware responses
+* Source citations
+* Page number references
+* Streaming AI responses
+* Hallucination reduction through grounded context
+
+### 🗄️ Vector Search
+
+* ChromaDB integration
+* Persistent vector storage
+* Semantic similarity search
+* Metadata filtering
+* Top-K retrieval
+* Fast document retrieval
+
+### 💬 Chat Experience
+
+* Chat history
+* Markdown rendering
+* Code syntax highlighting
+* Streaming responses
+* Copy response
+* Regenerate answer
+* Auto scroll
+
+### 🎨 Frontend
+
+* Next.js 15
+* Responsive UI
+* Tailwind CSS
+* Dark Mode
+* Light Mode
+* Modern dashboard
+* Analytics panel
+
+### 🔐 Security
+
+* JWT Authentication
+* Password hashing
+* Role-based access control (RBAC)
+* Protected APIs
+* Secure file uploads
+* Input validation
+* Rate limiting
+* CORS protection
+
+### 📊 Analytics
+
+* Document statistics
+* Chunk analytics
+* Embedding analytics
+* Retrieval analytics
+* Response latency
+* Token usage
+
+### 🐳 DevOps
+
+* Docker support
+* Docker Compose
+* Nginx Reverse Proxy
+* Health checks
+* Production configuration
+* Structured logging
+
+---
+
+# 🚀 System Architecture
+
+```text
+                     User
+
+                       │
+
+                       ▼
+
+              Next.js Frontend
+
+                       │
+
+              REST API / Streaming
+
+                       │
+
+                       ▼
+
+              FastAPI Backend
+
+                       │
+
+      ┌────────────────┼─────────────────┐
+
+      │                │                 │
+
+      ▼                ▼                 ▼
+
+Document Loader   Authentication     Chat API
+
+      │
+
+      ▼
+
+Text Extraction
+
+      │
+
+      ▼
+
+Text Cleaning
+
+      │
+
+      ▼
+
+Recursive Chunking
+
+      │
+
+      ▼
+
+Sentence Embeddings
+
+      │
+
+      ▼
+
+ChromaDB Vector Store
+
+      │
+
+      ▼
+
+Semantic Retrieval
+
+      │
+
+      ▼
+
+Prompt Builder
+
+      │
+
+      ▼
+
+Local LLM (Ollama)
+
+      │
+
+      ▼
+
+Generated Response
+
+      │
+
+      ▼
+
+Streaming Answer + Citations
 ```
 
-### 2. End-to-End Execution Sequence Diagram
-```
-User             React Frontend           Node.js Gateway       ChromaDB Engine       Ollama LLM Core
-│                     │                         │                       │                     │
-├─► Ask Query ────────┼────────────────────────►│                       │                     │
-│   "Explain Q3 Rev"  │ (Send JWT auth)         │                       │                     │
-│                     │                         ├─► Run Safety Check ───┼────────────────────►│ (Prompt Injection Guard)
-│                     │                         │   (Passes)            │                     │
-│                     │                         │                       │                     │
-│                     │                         ├─► Embed & Query ─────►│                     │
-│                     │                         │   Cosine Similarity   │                     │
-│                     │                         │◄─ Return Top K Chunks─┤                     │
-│                     │                         │   with Source Metadata│                     │
-│                     │                         │                       │                     │
-│                     │                         ├─► Build Prompt ───────┼────────────────────►│ (Inject Context & Sources)
-│                     │                         │   Instruction         │                     │
-│                     │                         │                       │                     │
-│                     │                         ├─► Stream Stream SSE ──┼────────────────────►│ (Inference / Token Stream)
-│                     │◄────────────────────────┼───────────────────────┼─────────────────────┤
-│                     │                         │                       │                     │
-│◄── Display Tokens ──┤                         │                       │                     │
-│   With Source Citations                       │                       │                     │
+---
+
+# 🧩 RAG Workflow
+
+```text
+Upload Document
+
+      │
+
+      ▼
+
+Extract Text
+
+      │
+
+      ▼
+
+Clean Text
+
+      │
+
+      ▼
+
+Generate Chunks
+
+      │
+
+      ▼
+
+Generate Embeddings
+
+      │
+
+      ▼
+
+Store in ChromaDB
+
+      │
+
+      ▼
+
+User asks a question
+
+      │
+
+      ▼
+
+Convert question into embedding
+
+      │
+
+      ▼
+
+Retrieve Top-K Chunks
+
+      │
+
+      ▼
+
+Build Prompt
+
+      │
+
+      ▼
+
+Send to Ollama
+
+      │
+
+      ▼
+
+Generate Answer
+
+      │
+
+      ▼
+
+Display Answer + Sources
 ```
 
-### 3. Folder Structure Architecture
-```
-/
-├── backend/                  # Python machine learning microservice
+---
+
+# 🛠 Technology Stack
+
+## Frontend
+
+* Next.js 15
+* React
+* TypeScript
+* Tailwind CSS
+* shadcn/ui
+* Zustand
+* TanStack Query
+
+## Backend
+
+* Python 3.12
+* FastAPI
+* LangChain
+* SentenceTransformers
+* ChromaDB
+* Pydantic
+* Uvicorn
+
+## AI
+
+* Ollama
+* llama3.2
+* all-MiniLM-L6-v2
+
+## Database
+
+* ChromaDB
+* SQLite (Development)
+* PostgreSQL (Production)
+
+## DevOps
+
+* Docker
+* Docker Compose
+* Nginx
+
+## Testing
+
+* Pytest
+* FastAPI TestClient
+* Playwright
+
+---
+
+# 📁 Project Structure
+
+```text
+SemanticVault/
+
+├── backend/
 │   ├── app/
-│   │   ├── api/              # FastAPI routers
-│   │   ├── config/           # Pydantic configuration settings
-│   │   ├── rag/              # Ingestion & retrieval logic
-│   │   ├── services/         # Vector embeddings & database orchestrations
-│   │   └── main.py           # FastAPI server entrypoint
-│   ├── Dockerfile            # Container definition for ML service
-│   └── requirements.txt      # Python package dependencies
-├── data/                     # Physical database storage
-│   └── db.json               # Local database engine
-├── logs/                     # Rotation systems log
-│   └── system.log            # Physical logs output
-├── src/                      # React 19 Frontend Web Application
-│   ├── components/           # Modular visual views (Chat, Documents, Analytics, Settings)
-│   ├── types.ts              # Global TypeScript strict type mappings
-│   ├── App.tsx               # Primary interface orchestrator & React Router
-│   └── main.tsx              # React mounting root
-├── tests/                    # Core Testing Infrastructure
-│   └── api.test.ts           # Automatic multi-suite integration tests
-├── scripts/                  # Performance Evaluation Suite
-│   └── eval_rag.js           # RAG Pipeline Precision, Recall, and Latency Evaluation
-├── server.ts                 # Full-Stack Node.js express production API gateway
-├── server_helpers.ts         # PBKDF2 hashing, stateful rate-limiting, and stateless JWT engine
-├── package.json              # Client dependencies and execution tasks
-└── docker-compose.yml        # Development & production infrastructure compose configuration
-```
-
-### 4. RAG Ingestion and Query Pipeline
-```
-INGESTION PHASE:
-[Documents] ──► [Extraction (PyMuPDF)] ──► [Recursive Sliding Chunker] ──► [Embed (MiniLM)] ──► [ChromaDB Index]
-
-QUERY RETRIEVAL PHASE:
-[User Query] ──► [Compute Embed] ──► [Similarity Search (Chroma)] ──► [Retrieve Chunks] ──► [Prompt Builder] ──► [Ollama/Gemini]
-```
-
-### 5. Multi-Service Containerized Deployment
-```
-                       +--------------------------------------+
-                       |          Host Port: 3000             |
-                       +──────────────────┬───────────────────+
-                                          │
-                                          ▼
-                       +--------------------------------------+
-                       |       Nginx Reverse Proxy            |
-                       +──────────────────┬───────────────────+
-                                          │
-                                          ▼
-                       +--------------------------------------+
-                       |      Node.js Gateway Container       |
-                       +──────┬────────────────────────┬──────+
-                              │                        │
-                              ▼                        ▼
-               +────────────────────────+    +────────────────────────+
-               | Python ML Container    |    | Local Database Volume  |
-               | (Port 8000 / FastAPI)  |    |     (/data/db.json)    |
-               +────────────────────────+    +────────────────────────+
+│   │   ├── api/
+│   │   ├── auth/
+│   │   ├── chunking/
+│   │   ├── config/
+│   │   ├── core/
+│   │   ├── embeddings/
+│   │   ├── loaders/
+│   │   ├── models/
+│   │   ├── ollama/
+│   │   ├── prompts/
+│   │   ├── rag/
+│   │   ├── retrieval/
+│   │   ├── services/
+│   │   ├── utils/
+│   │   ├── vectorstore/
+│   │   └── main.py
+│   │
+│   ├── uploads/
+│   ├── chroma_db/
+│   ├── tests/
+│   ├── requirements.txt
+│   ├── Dockerfile
+│   └── .env.example
+│
+├── frontend/
+│   ├── app/
+│   ├── components/
+│   ├── hooks/
+│   ├── lib/
+│   ├── services/
+│   ├── public/
+│   ├── styles/
+│   ├── package.json
+│   └── Dockerfile
+│
+├── docker-compose.yml
+├── nginx/
+├── LICENSE
+└── README.md
 ```
 
 ---
 
-## 💻 TECH STACK EXPLAINED
+# ⚙️ Installation
 
-| Component | Technology | Role | Why We Selected It |
-| :--- | :--- | :--- | :--- |
-| **Frontend UI** | React 19 + TypeScript + Tailwind CSS | Interactive Developer Dashboard | High speed, robust type safety, fluid layouts, and gorgeous modular rendering. |
-| **API Backend Gateway** | Node.js + Express + TSX | Main Full-Stack Server on Port 3000 | Lightweight, handles fast server-sent events (SSE) streaming, telemetry dashboards, and security. |
-| **ML Microservice** | Python 3.12 + FastAPI | RAG Vector Orchestration Layer | High performance for machine learning libraries, native type validations (Pydantic), and direct GPU support. |
-| **Embedding Engine**| SentenceTransformers | Semantic Vector Translation | Utilizes the `all-MiniLM-L6-v2` model locally to encode chunks into 384-dimensional dense vectors. |
-| **Vector Database** | ChromaDB | High-Dimensional Vector Search | Embeddable, lightweight, open-source vector store designed specifically for RAG and LLM applications. |
-| **Local LLM Server**| Ollama | Local Inference Model Server | Runs high-performance open-source LLMs (llama3.2 3B) on local hardware with OpenAI-compatible interfaces. |
+## Clone Repository
 
----
-
-## 🛡️ CRYPTOGRAPHIC SECURITY & HEURISTICS
-
-SemanticVault is hardened to enterprise-grade compliance standards:
-- **Stateless HMAC-SHA256 JWT sessions**: Authenticates users securely without high-latency state fetches.
-- **Robust PBKDF2 Password Hashing**: Avoids rainbow-table lookups using high-entropy salt strings and 1000 iteration cycles.
-- **Parametric Rate-Limiting**: Controls client concurrency, shielding endpoints from DoS/Brute-Force attacks.
-- **Heuristic Threat Scanners**: Standard inputs are run against system-instruction override matching heuristics, instantly blocking Prompt Injection.
-
----
-
-## 🛠️ INSTALLATION & DEVELOPMENT PLAYBOOK
-
-### 1. Configure Environmental Settings
-Create a `.env` file at the root directory based on `.env.example`:
-```env
-GEMINI_API_KEY="your-gemini-api-key-here"
-JWT_SECRET="your-high-entropy-jwt-secret-string-here"
-```
-
-### 2. Launch Local Dev Mode
-Install dependencies and run the Node.js Express server:
 ```bash
-npm install
-npm run dev
-```
-The unified server starts instantly on http://localhost:3000, serving the compiled React frontend, full-stack endpoints, telemetry dashboards, and user sessions.
+git clone https://github.com/your-username/SemanticVault.git
 
-### 3. Run Ingest and Vector Engine (Optional)
-If running Python modules locally:
+cd SemanticVault
+```
+
+---
+
+## Backend
+
 ```bash
 cd backend
-python -m venv .venv
-source .venv/bin/activate
+
+python -m venv venv
+
+source venv/bin/activate
+```
+
+Windows
+
+```bash
+venv\Scripts\activate
+```
+
+Install dependencies
+
+```bash
 pip install -r requirements.txt
-python app/main.py
-```
-
-### 4. Production Orchestration with Docker Compose
-Orchestrate all containers automatically:
-```bash
-docker-compose up --build
 ```
 
 ---
 
-## 🧪 TESTING & AUTOMATED QUALITY ASSURANCE
+## Frontend
 
-We maintain a rigorous quality assurance loop across development stages.
-
-### 1. Run Unit & Integration Tests
-We verify token verification, cryptographic PBKDF2 hashing, security injection scanners, sliding overlap chunking, and similarity ranking directly in an automated test suite:
 ```bash
-# Run tests directly in Node environment
-npx tsx tests/api.test.ts
-```
+cd frontend
 
-### 2. Run RAG Performance & Precision Evaluation Script
-We assess Mean Precision @ K, Mean Recall @ K, Mean Reciprocal Rank (MRR), response latency percentiles, and hallucination metrics:
-```bash
-# Execute evaluation benchmarks
-node scripts/eval_rag.js
+npm install
 ```
 
 ---
 
-## 📄 LICENSE
-This project is licensed under the [MIT License](LICENSE). Contributions must adhere to the [Contributing Guidelines](CONTRIBUTING.md).
+## Install Ollama
+
+Install Ollama from the official website.
+
+Download the required model:
+
+```bash
+ollama pull llama3.2
+```
+
+Verify installation:
+
+```bash
+ollama run llama3.2
+```
+
+---
+
+## Run Backend
+
+```bash
+uvicorn app.main:app --reload
+```
+
+---
+
+## Run Frontend
+
+```bash
+npm run dev
+```
+
+---
+
+# 🐳 Docker
+
+Build and start the application:
+
+```bash
+docker compose up --build
+```
+
+Run in detached mode:
+
+```bash
+docker compose up -d
+```
+
+Stop services:
+
+```bash
+docker compose down
+```
+
+---
+
+# 🔑 Environment Variables
+
+Example `.env`
+
+```env
+APP_NAME=SemanticVault
+APP_VERSION=1.0.0
+
+HOST=127.0.0.1
+PORT=8000
+
+OLLAMA_BASE_URL=http://localhost:11434
+
+EMBEDDING_MODEL=all-MiniLM-L6-v2
+
+VECTOR_DB_PATH=./chroma_db
+
+JWT_SECRET_KEY=change_this_secret
+
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+```
+
+---
+
+# 📡 API Endpoints
+
+| Method | Endpoint            | Description                  |
+| ------ | ------------------- | ---------------------------- |
+| POST   | /upload             | Upload document              |
+| GET    | /documents          | List uploaded documents      |
+| DELETE | /documents/{id}     | Delete document              |
+| POST   | /chunk/{id}         | Generate chunks              |
+| POST   | /embeddings/{id}    | Generate embeddings          |
+| POST   | /vectors/index/{id} | Index vectors                |
+| POST   | /retrieve           | Retrieve relevant chunks     |
+| POST   | /chat               | Chat with uploaded documents |
+| GET    | /history            | Conversation history         |
+| DELETE | /history            | Clear history                |
+| POST   | /register           | Register                     |
+| POST   | /login              | Login                        |
+| GET    | /profile            | User profile                 |
+
+Interactive API documentation:
+
+```
+http://localhost:8000/docs
+```
+
+---
+
+# 📊 Performance
+
+* Fast semantic retrieval
+* Streaming responses
+* Persistent vector storage
+* Background indexing
+* Batch embedding generation
+* Lazy loading
+* Context caching
+* Optimized chunk retrieval
+
+---
+
+# 🔒 Security
+
+* JWT Authentication
+* Password hashing
+* Secure file validation
+* Prompt injection mitigation
+* Role-based access
+* Protected APIs
+* Rate limiting
+* Structured logging
+
+---
+
+# 🧪 Testing
+
+Backend
+
+```bash
+pytest
+```
+
+Frontend
+
+```bash
+npm run test
+```
+
+Coverage
+
+```bash
+pytest --cov=app
+```
+
+---
+
+# 🚀 Future Improvements
+
+* Hybrid Search (BM25 + Vector Search)
+* Cross Encoder Re-ranking
+* OCR Support
+* Image Search
+* Audio Document Support
+* Video Transcript Search
+* Multimodal RAG
+* Redis Cache
+* Knowledge Graph Integration
+* Agentic RAG
+* LangGraph Workflows
+* Kubernetes Deployment
+* Prometheus Monitoring
+* Grafana Dashboards
+
+---
+
+# 🤝 Contributing
+
+Contributions are welcome.
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to your branch
+5. Open a Pull Request
+
+---
+
+# 📄 License
+
+This project is licensed under the MIT License.
+
+---
+
+# ⭐ Why SemanticVault?
+
+SemanticVault demonstrates practical experience in:
+
+* Retrieval-Augmented Generation (RAG)
+* Local LLM Integration
+* Semantic Search
+* Vector Databases
+* Prompt Engineering
+* AI Application Development
+* FastAPI
+* Next.js
+* Docker
+* Authentication
+* Full-Stack Development
+* Production Software Architecture
+
+It is designed as a portfolio-quality project that showcases modern AI engineering practices while maintaining complete user privacy through local inference.
+
+---
+
+## 📌 Version
+
+**Current Version:** `v1.0.0`
+
+---
+
+**If you found this project useful, consider giving it a ⭐ on GitHub!**
