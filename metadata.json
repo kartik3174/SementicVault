@@ -1,0 +1,6 @@
+{
+  "name": "SemanticVault",
+  "description": "An interactive, local-ready Semantic Retrieval System (RAG) playground. Visualize chunking, vector embeddings, semantic search, and citations in real-time.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
