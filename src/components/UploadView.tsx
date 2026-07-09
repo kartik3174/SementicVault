@@ -14,11 +14,12 @@ import {
 import { ToastMessage } from "../types";
 
 interface UploadViewProps {
+  token: string | null;
   onUploadSuccess: () => void;
   addToast: (toast: Omit<ToastMessage, "id">) => void;
 }
 
-export function UploadView({ onUploadSuccess, addToast }: UploadViewProps) {
+export function UploadView({ token, onUploadSuccess, addToast }: UploadViewProps) {
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{
@@ -117,8 +118,12 @@ export function UploadView({ onUploadSuccess, addToast }: UploadViewProps) {
       formData.append("clean_bullets", cleanBullets.toString());
 
       try {
+        const authToken = token || localStorage.getItem("semantic_vault_token") || "";
         const response = await fetch("/api/documents/upload", {
           method: "POST",
+          headers: {
+            "Authorization": `Bearer ${authToken}`
+          },
           body: formData
         });
 

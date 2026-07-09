@@ -539,6 +539,7 @@ export default function App() {
 
         {activePage === "upload" && (
           <UploadView
+            token={token}
             onUploadSuccess={fetchDocuments}
             addToast={addToast}
           />
